@@ -1,0 +1,22 @@
+# runtime state (per instance, never commit)
+offset.txt
+last_poll.txt
+last_sender.txt
+outbox.txt
+outbox_state.json
+outbox_daemon.log
+bridge.log
+health.json
+rotation.json
+dead_letters.txt
+unknown_senders.log
+conversation.md
+config.json
+credential
+forum_chat_id
+topics/
+run/
+staging/
+.DS_Store
+*.pyc
+__pycache__/
