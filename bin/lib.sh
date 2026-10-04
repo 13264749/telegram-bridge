@@ -22,6 +22,20 @@ if [ -z "${DISCORD_TOKEN:-}" ]; then
 fi
 export DISCORD_TOKEN
 
+# wait_for_change <file> [timeout] — block until <file> is modified.
+# Uses inotifywait when available (instant wake, zero CPU); falls back to
+# sleep. Callers must re-check their condition after return: an event can
+# be missed between the check and the wait starting (then the timeout
+# covers it — worst case = the old polling latency).
+wait_for_change() {
+  local file="$1" timeout_s="${2:-3}"
+  if [ -f "$file" ] && command -v inotifywait >/dev/null 2>&1; then
+    inotifywait -qq -e modify --timeout "$timeout_s" "$file" 2>/dev/null || true
+  else
+    sleep "$timeout_s"
+  fi
+}
+
 # bridge_log <message> — metadata-only event log (never message content).
 bridge_log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')" "$*" >> "$BRIDGE_DIR/bridge.log"
