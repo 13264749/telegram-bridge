@@ -25,7 +25,10 @@ import urllib.request
 DIR = os.environ.get("TG_BRIDGE_DIR",
                      os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 QUEUE = os.environ.get("TOPIC_QUEUE", "_main")
+SOURCE = os.environ.get("BRIDGE_SOURCE", "telegram")
 BIN = os.path.join(DIR, "bin")
+OUTBOX_BIN = os.path.join(BIN, "discord", "dc-outbox.sh") if SOURCE == "discord" \
+    else os.path.join(BIN, "tg-outbox.sh")
 API_KEY = os.environ.get("LLM_API_KEY", "")
 BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
@@ -34,7 +37,7 @@ SYSTEM_PROMPT = os.environ.get(
     "You are a helpful assistant chatting on Telegram. Be concise.")
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "40"))
 
-LINE_RE = re.compile(r"^\[Telegram \d\d:\d\d @([^#]+)#(\d+)([^]]*)\] (.*)$")
+LINE_RE = re.compile(r"^\[(\w+) \d\d:\d\d @([^#]+)#(\d+)([^]]*)\] (.*)$")
 histories = {}
 
 
@@ -59,14 +62,14 @@ def outbox_append(block):
         fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def reply(name, msg_id, thread, text):
+def reply(source, name, msg_id, thread, text):
     lines = []
     if name:
-        lines.append("[Telegram→%s]" % name)
+        lines.append("[%s→%s]" % (source, name))
     if thread:
-        lines.append("__TG_THREAD__%s" % thread)
+        lines.append("__THREAD__%s" % thread)
     if msg_id:
-        lines.append("__TG_REPLY_TO__%s" % msg_id)
+        lines.append("__REPLY_TO__%s" % msg_id)
     lines.append(text)
     lines.append("__TG_SEND__")
     outbox_append("\n".join(lines) + "\n")
@@ -85,19 +88,49 @@ def route_for(name, flags):
     return rname, thread
 
 
-def handle_newtopic(name, msg_id, thread, text):
+def handle_newtopic(source, name, msg_id, thread, text):
     topic = text[len("/newtopic"):].strip()
     if not topic:
-        reply(name, msg_id, thread, "Usage: /newtopic <name>")
+        reply(source, name, msg_id, thread, "Usage: /newtopic <name>")
         return
+    env = dict(os.environ, TG_BRIDGE_DIR=DIR)
+    if source == "Discord":
+        dc = os.path.join(BIN, "discord", "dc")
+        cfg = {}
+        try:
+            with open(os.path.join(DIR, "discord.json"), encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            pass
+        channels = [str(c) for c in cfg.get("channels", [])]
+        if not channels:
+            reply(source, name, msg_id, thread,
+                  "No channels configured in discord.json.")
+            return
+        try:
+            out = subprocess.run(
+                [dc, "create-thread", "--channel", channels[0], "--name", topic],
+                capture_output=True, text=True, timeout=60, env=env)
+            data = json.loads(out.stdout or "{}")
+            tid = data.get("id")
+        except Exception as exc:
+            reply(source, name, msg_id, thread, "Failed to create thread: %s" % exc)
+            return
+        if not tid:
+            reply(source, name, msg_id, thread, "Failed to create thread.")
+            return
+        reply(source, name, msg_id, thread,
+              "Thread '%s' created. Start its agent with: "
+              "TOPIC_QUEUE=thread_%s python3 examples/llm_agent.py" % (topic, tid))
+        return
+    # Telegram
     forum_file = os.path.join(DIR, "forum_chat_id")
     if not os.path.isfile(forum_file):
-        reply(name, msg_id, thread,
+        reply(source, name, msg_id, thread,
               "No forum group configured yet (see docs/TOPICS.md).")
         return
     forum = open(forum_file).read().strip()
     tg = os.path.join(BIN, "tg")
-    env = dict(os.environ, TG_BRIDGE_DIR=DIR)
     try:
         out = subprocess.run(
             [tg, "create-topic", "--chat-id", forum, "--name", topic],
@@ -105,14 +138,14 @@ def handle_newtopic(name, msg_id, thread, text):
         data = json.loads(out.stdout or "{}")
         tid = (data.get("result") or {}).get("message_thread_id")
     except Exception as exc:
-        reply(name, msg_id, thread, "Failed to create topic: %s" % exc)
+        reply(source, name, msg_id, thread, "Failed to create topic: %s" % exc)
         return
     if not tid:
-        reply(name, msg_id, thread,
+        reply(source, name, msg_id, thread,
               "Failed to create topic: %s" % (data.get("description") or "API error") +
               " — is the bot admin with Manage Topics?")
         return
-    reply(name, msg_id, thread,
+    reply(source, name, msg_id, thread,
           "Topic '%s' created (id %s). Start its agent with: "
           "TOPIC_QUEUE=%s python3 examples/llm_agent.py" % (topic, tid, tid))
 
@@ -123,19 +156,20 @@ def handle_line(line):
     m = LINE_RE.match(line)
     if not m:
         return
-    name, msg_id, flags, text = m.group(1), m.group(2), m.group(3), m.group(4)
+    source, name, msg_id, flags, text = (m.group(1), m.group(2), m.group(3),
+                                        m.group(4), m.group(5))
     rname, thread = route_for(name, flags)
     if text == "/start":
-        reply(rname, msg_id, thread,
-              "Hi! I'm an LLM on Telegram. Send me anything, or try /help.")
+        reply(source, rname, msg_id, thread,
+              "Hi! I'm an LLM on %s. Send me anything, or try /help." % source)
         return
     if text == "/help":
-        reply(rname, msg_id, thread,
+        reply(source, rname, msg_id, thread,
               "Commands: /start, /help, /newtopic <name>. "
               "Anything else goes to the model.")
         return
     if text.startswith("/newtopic"):
-        handle_newtopic(rname, msg_id, thread, text)
+        handle_newtopic(source, rname, msg_id, thread, text)
         return
     hist = histories.setdefault(name, [])
     hist.append({"role": "user", "content": text})
@@ -144,11 +178,11 @@ def handle_line(line):
     try:
         answer = chat([{"role": "system", "content": SYSTEM_PROMPT}] + hist)
     except Exception as exc:
-        reply(rname, msg_id, thread, "Model error: %s" % exc)
+        reply(source, rname, msg_id, thread, "Model error: %s" % exc)
         return
     hist.append({"role": "assistant", "content": answer})
     histories[name] = hist[-HISTORY_LIMIT:]
-    reply(rname, msg_id, thread, answer)
+    reply(source, rname, msg_id, thread, answer)
 
 
 def main():
@@ -157,11 +191,11 @@ def main():
         sys.exit(2)
     # Make sure the outbox daemon is running (the dispatcher usually owns it).
     try:
-        subprocess.run(["pgrep", "-f", "tg-outbox.sh"], check=True,
+        subprocess.run(["pgrep", "-f", OUTBOX_BIN], check=True,
                        capture_output=True)
     except subprocess.CalledProcessError:
         env = dict(os.environ, TG_BRIDGE_DIR=DIR)
-        subprocess.Popen([os.path.join(BIN, "tg-outbox.sh")], env=env,
+        subprocess.Popen([OUTBOX_BIN], env=env,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     watcher = [os.path.join(BIN, "tg-topic-watch.sh"), QUEUE]
     env = dict(os.environ, TG_BRIDGE_DIR=DIR)
