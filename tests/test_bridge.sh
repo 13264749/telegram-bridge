@@ -518,6 +518,40 @@ check_grep "neutral reply marker routed" "$T/sends.log" "reply_to=789"
 check_grep "neutral thread marker routed" "$T/sends.log" "thread=5"
 rm -f "$T/forum_chat_id"
 
+# ---- 27. wait_for_change prefers inotifywait when available ----
+mkdir -p "$T/fakebin"
+cat > "$T/fakebin/inotifywait" <<'EOF'
+#!/usr/bin/env bash
+echo "called $*" >> "${INOTIFY_CALLS:?}/calls.log"
+sleep 0.2
+exit 0
+EOF
+chmod +x "$T/fakebin/inotifywait"
+export INOTIFY_CALLS="$T"
+rm -f "$T/calls.log"
+printf '[Telegram 10:00 @x#1] a\n' > "$T/topics/qz.queue"
+printf '1\n' > "$T/topics/qz.offset"
+set +e
+PATH="$T/fakebin:$PATH" TOPIC_WATCH_POLL=30 timeout 3 bash "$B/tg-topic-watch.sh" qz >/dev/null 2>&1
+set -e
+check "watcher uses inotifywait when present" test -s "$T/calls.log"
+
+# ---- 28. watcher wakes promptly on append (inotify path) ----
+rm -f "$T/calls.log"
+: > "$T/topics/qw.queue"
+rm -f "$T/topics/qw.offset"
+( sleep 0.5; printf '[Telegram 10:00 @x#9] ping\n' >> "$T/topics/qw.queue" ) &
+set +e
+START=$(date +%s)
+WOUT3="$(PATH="$T/fakebin:$PATH" TOPIC_WATCH_POLL=30 timeout 15 bash "$B/tg-topic-watch.sh" qw 2>/dev/null)"
+wrc3=$?
+END=$(date +%s)
+set -e
+wait 2>/dev/null || true
+check "watcher exits 0 on inotify wake" test "$wrc3" = "0"
+check "watcher prints appended line" test "$WOUT3" = "[Telegram 10:00 @x#9] ping"
+check "watcher woke fast (no 30s poll)" test "$((END - START))" -lt 10
+
 echo "----"
 echo "passed: $pass failed: $fail"
 [ "$fail" = "0" ]
