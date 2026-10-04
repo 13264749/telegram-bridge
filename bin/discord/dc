@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Discord API client for the telegram-bridge project (transport adapter).
+
+Auth: the bot token is read from the DISCORD_TOKEN environment variable,
+or from a `token` file inside the bridge dir ($TG_BRIDGE_DIR).
+Sent as an `Authorization: Bot <token>` header.
+
+Subcommands: getme, messages, send, create-thread, list-threads, open-dm.
+
+Note: this adapter polls via REST (no gateway). Message content comes back
+from GET /channels/{id}/messages; if you get empty content, enable the
+"Message Content" privileged intent in the Developer Portal.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API = "https://discord.com/api/v10"
+
+
+def read_token():
+    token = os.environ.get("DISCORD_TOKEN", "").strip()
+    if token:
+        return token
+    bridge_dir = os.environ.get("TG_BRIDGE_DIR", os.getcwd())
+    token_file = os.path.join(bridge_dir, "token")
+    if os.path.isfile(token_file):
+        with open(token_file, "r", encoding="utf-8") as fh:
+            token = fh.read().strip()
+        if token:
+            return token
+    print("error: no Discord bot token. Set DISCORD_TOKEN or write it to "
+          "$TG_BRIDGE_DIR/token", file=sys.stderr)
+    sys.exit(2)
+
+
+def call(method, path, body=None, timeout=30):
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(API + path, data=data, method=method)
+    req.add_header("Authorization", "Bot " + read_token())
+    req.add_header("User-Agent", "telegram-bridge-discord/1.0")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {"ok": True}
+    except urllib.error.HTTPError as exc:
+        try:
+            err = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            err = {"message": str(exc.reason)}
+        # Surface Discord's retry_after so callers can back off.
+        return {"ok": False, "error_code": exc.code, "discord": err,
+                "retry_after": err.get("retry_after")}
+    except Exception as exc:
+        return {"ok": False, "error_code": "local", "description": str(exc)}
+
+
+def cmd_getme(args):
+    print(json.dumps(call("GET", "/users/@me", timeout=30), ensure_ascii=False))
+
+
+def cmd_messages(args):
+    q = {"limit": args.limit}
+    if args.after:
+        q["after"] = args.after
+    path = "/channels/%s/messages?%s" % (args.channel, urllib.parse.urlencode(q))
+    print(json.dumps(call("GET", path, timeout=30), ensure_ascii=False))
+
+
+def cmd_send(args):
+    text = args.text or ""
+    chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)] or [""]
+    results = []
+    for chunk in chunks:
+        body = {"content": chunk}
+        if args.reply_to:
+            body["message_reference"] = {"message_id": str(args.reply_to)}
+        results.append(call("POST", "/channels/%s/messages" % args.channel,
+                            body, timeout=30))
+    print(json.dumps(results, ensure_ascii=False))
+
+
+def cmd_create_thread(args):
+    body = {"name": args.name, "auto_archive_duration": 60}
+    print(json.dumps(call("POST", "/channels/%s/threads" % args.channel,
+                          body, timeout=30), ensure_ascii=False))
+
+
+def cmd_list_threads(args):
+    print(json.dumps(call("GET", "/channels/%s/threads/active" % args.channel,
+                          timeout=30), ensure_ascii=False))
+
+
+def cmd_open_dm(args):
+    print(json.dumps(call("POST", "/users/@me/channels",
+                          {"recipient_id": str(args.user_id)}, timeout=30),
+                     ensure_ascii=False))
+
+
+def cmd_dm_channels(args):
+    print(json.dumps(call("GET", "/users/@me/channels", timeout=30),
+                     ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Discord bridge CLI")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("getme", help="verify the bot token").set_defaults(func=cmd_getme)
+    p = sub.add_parser("messages", help="list channel messages (newest first)")
+    p.add_argument("--channel", required=True)
+    p.add_argument("--after", default=None, help="only messages after this id")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(func=cmd_messages)
+    p = sub.add_parser("send", help="send a message to a channel/thread")
+    p.add_argument("--channel", required=True)
+    p.add_argument("--text", required=True)
+    p.add_argument("--reply-to", default=None)
+    p.set_defaults(func=cmd_send)
+    p = sub.add_parser("create-thread", help="create a public thread")
+    p.add_argument("--channel", required=True)
+    p.add_argument("--name", required=True)
+    p.set_defaults(func=cmd_create_thread)
+    p = sub.add_parser("list-threads", help="list active threads of a channel")
+    p.add_argument("--channel", required=True)
+    p.set_defaults(func=cmd_list_threads)
+    p = sub.add_parser("open-dm", help="get/create a DM channel with a user")
+    p.add_argument("--user-id", required=True)
+    p.set_defaults(func=cmd_open_dm)
+    p = sub.add_parser("dm-channels", help="list the bot's DM channels")
+    p.set_defaults(func=cmd_dm_channels)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
