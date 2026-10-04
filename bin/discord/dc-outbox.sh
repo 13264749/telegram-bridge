@@ -220,5 +220,5 @@ if requeue:
 save_json(state_path, state)
 PYEOF
   fi
-  sleep "$POLL"
+  wait_for_change "$OUTBOX" "$POLL"
 done
