@@ -204,5 +204,5 @@ if requeue:
             f.write(chunk + "\n" + sep + "\n")
 PYEOF
   fi
-  sleep "$POLL"
+  wait_for_change "$OUTBOX" "$POLL"
 done
