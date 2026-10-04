@@ -33,6 +33,7 @@ cd telegram-bridge
 
 # 2. Token + who may talk to the bot (your Telegram numeric chat id;
 #    find it via @userinfobot).
+chmod +x bin/* examples/*.sh examples/*.py
 echo '<bot-token>' > token && chmod 600 token
 cp accounts.json.example accounts.json   # then edit the ids
 bin/tg getme                              # verify the token
