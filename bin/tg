@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Telegram Bot API client for the telegram-bridge project.
+
+Auth: the bot token is read from the TG_TOKEN environment variable, or from
+a `token` file inside the bridge dir ($TG_BRIDGE_DIR, default: current
+directory). The token is placed in the URL path with a literal colon
+(NOT percent-encoded): Telegram's edge returns 404 for a percent-encoded
+colon in the token path.
+
+Subcommands: getme, updates, send, create-topic, set-commands.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+API_HOST = "https://api.telegram.org"
+
+
+def read_token():
+    token = os.environ.get("TG_TOKEN", "").strip()
+    if token:
+        return token
+    bridge_dir = os.environ.get("TG_BRIDGE_DIR", os.getcwd())
+    token_file = os.path.join(bridge_dir, "token")
+    if os.path.isfile(token_file):
+        with open(token_file, "r", encoding="utf-8") as fh:
+            token = fh.read().strip()
+        if token:
+            return token
+    print("error: no bot token. Set TG_TOKEN or write it to "
+          "$TG_BRIDGE_DIR/token", file=sys.stderr)
+    sys.exit(2)
+
+
+def api_url(method, token):
+    safe_token = urllib.parse.quote(token, safe=":")
+    return "%s/bot%s/%s" % (API_HOST, safe_token, method)
+
+
+def call(method, params=None, timeout=60):
+    data = urllib.parse.urlencode(params or {}).encode("utf-8")
+    req = urllib.request.Request(api_url(method, read_token()), data=data,
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            return {"ok": False, "error_code": exc.code,
+                    "description": str(exc.reason)}
+    except Exception as exc:
+        return {"ok": False, "error_code": "local", "description": str(exc)}
+
+
+def cmd_getme(args):
+    print(json.dumps(call("getMe", timeout=90), ensure_ascii=False))
+
+
+def cmd_updates(args):
+    params = {"timeout": args.timeout, "allowed_updates": json.dumps(["message"])}
+    if args.offset:
+        params["offset"] = args.offset
+    print(json.dumps(call("getUpdates", params, timeout=args.timeout + 30),
+                     ensure_ascii=False))
+
+
+def cmd_create_topic(args):
+    params = {"chat_id": args.chat_id, "name": args.name}
+    print(json.dumps(call("createForumTopic", params, timeout=30),
+                     ensure_ascii=False))
+
+
+def cmd_set_commands(args):
+    try:
+        commands = json.loads(args.commands)
+    except Exception as exc:
+        print(json.dumps({"ok": False,
+                          "description": "bad --commands JSON: %s" % exc}))
+        return
+    print(json.dumps(call("setMyCommands", {"commands": json.dumps(commands)},
+                          timeout=30), ensure_ascii=False))
+
+
+def cmd_send(args):
+    text = args.text or ""
+    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)] or [""]
+    results = []
+    for chunk in chunks:
+        params = {"chat_id": args.chat_id, "text": chunk}
+        if args.reply_to:
+            params["reply_to_message_id"] = args.reply_to
+        if args.thread_id:
+            params["message_thread_id"] = args.thread_id
+        results.append(call("sendMessage", params, timeout=30))
+    print(json.dumps(results, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Telegram bridge CLI")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("getme", help="verify the bot token (getMe)").set_defaults(func=cmd_getme)
+    p = sub.add_parser("updates", help="fetch pending updates via long polling")
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--timeout", type=int, default=40)
+    p.set_defaults(func=cmd_updates)
+    p = sub.add_parser("send", help="send a text message")
+    p.add_argument("--chat-id", required=True)
+    p.add_argument("--text", required=True)
+    p.add_argument("--reply-to", default=None,
+                   help="thread the message as a reply to this message_id")
+    p.add_argument("--thread-id", default=None,
+                   help="post into a forum topic (message_thread_id)")
+    p.set_defaults(func=cmd_send)
+    p = sub.add_parser("create-topic", help="create a forum topic")
+    p.add_argument("--chat-id", required=True, help="forum supergroup chat id")
+    p.add_argument("--name", required=True, help="topic name")
+    p.set_defaults(func=cmd_create_topic)
+    p = sub.add_parser("set-commands", help="register the bot command menu")
+    p.add_argument("--commands", required=True,
+                   help='JSON list, e.g. [{"command":"start","description":"..."}]')
+    p.set_defaults(func=cmd_set_commands)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
