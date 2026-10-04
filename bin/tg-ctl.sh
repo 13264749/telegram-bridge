@@ -6,7 +6,7 @@
 # (the supervisor's completion is what wakes the agent on new messages),
 # so there is intentionally no `start` here — see the bridge docs.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 
 pat() {
   # Bracket trick: the pattern must not literally appear in our own command
