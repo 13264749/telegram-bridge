@@ -413,6 +413,111 @@ grep -q "no bot token" "$T/notok.err" \
   && { pass=$((pass+1)); echo "PASS tg no-token no traceback"; } \
   || { fail=$((fail+1)); echo "FAIL tg no-token no traceback"; }
 
+# ---- 23. dc CLI: imports, subcommands, clean no-token error ----
+DC_CLI="$B/discord/dc"
+set +e
+python3 -c "import runpy; runpy.run_path('$DC_CLI', run_name='__dc_test__')" >/dev/null 2>&1
+rc23a=$?
+set -e
+check "dc CLI imports cleanly" test "$rc23a" = "0"
+python3 "$DC_CLI" send --help 2>&1 | grep -q -- "--channel" \
+  && { pass=$((pass+1)); echo "PASS dc send has --channel"; } \
+  || { fail=$((fail+1)); echo "FAIL dc send has --channel"; }
+python3 "$DC_CLI" create-thread --help 2>&1 | grep -q -- "--name" \
+  && { pass=$((pass+1)); echo "PASS dc create-thread has --name"; } \
+  || { fail=$((fail+1)); echo "FAIL dc create-thread has --name"; }
+set +e
+DISCORD_TOKEN= TG_BRIDGE_DIR="$T/empty_nodir_xyz" python3 "$DC_CLI" getme >"$T/dcnotok.out" 2>"$T/dcnotok.err"
+rc23b=$?
+set -e
+check "dc without token exits 2" test "$rc23b" = "2"
+grep -q "no Discord bot token" "$T/dcnotok.err" \
+  && { pass=$((pass+1)); echo "PASS dc no-token message"; } \
+  || { fail=$((fail+1)); echo "FAIL dc no-token message"; }
+
+# ---- 24. dc-dispatch: poll -> queue lines (oneshot, fake dc) ----
+cat > "$T/bin/fake-dc" <<'EOF'
+#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+if args[0] == "getme":
+    print(json.dumps({"id": "999", "username": "testbot"}))
+elif args[0] == "dm-channels":
+    print(json.dumps([]))
+elif args[0] == "list-threads":
+    print(json.dumps({"threads": []}))
+elif args[0] == "messages":
+    after = args[args.index("--after") + 1] if "--after" in args else None
+    msgs = [
+        {"id": "m3", "channel_id": "C1", "author": {"id": "111"},
+         "content": "third", "attachments": []},
+        {"id": "m2", "channel_id": "C1", "author": {"id": "222"},
+         "content": "second", "attachments": []},
+        {"id": "m1", "channel_id": "C1", "author": {"id": "999", "bot": True},
+         "content": "own, skip me", "attachments": []},
+    ]
+    if after:
+        msgs = [m for m in msgs if int(m["id"][1:]) > int(after[1:])]
+    print(json.dumps(msgs))
+elif args[0] == "send":
+    ch = args[args.index("--channel") + 1]
+    text = args[args.index("--text") + 1]
+    rt = args[args.index("--reply-to") + 1] if "--reply-to" in args else "-"
+    with open(os.environ["TG_BRIDGE_DIR"] + "/dc_sends.log", "a", encoding="utf-8") as f:
+        f.write("SEND channel=%s reply_to=%s text=%s\n" % (ch, rt, text))
+    print(json.dumps([{"id": "sent1", "channel_id": ch}]))
+elif args[0] == "open-dm":
+    uid = args[args.index("--user-id") + 1]
+    print(json.dumps({"id": "DM" + uid, "type": 1}))
+else:
+    print(json.dumps({"ok": False, "description": "fake-dc: unknown " + args[0]}))
+EOF
+chmod +x "$T/bin/fake-dc"
+printf '{"channels": ["C1"], "queues": {"C1": "_main"}, "discover_dms": false, "auto_threads": false, "poll_interval": 1}' > "$T/discord.json"
+printf '{"111": "me"}' > "$T/discord_accounts.json"
+rm -f "$T/discord_cursors.json" "$T/unknown_senders.log" "$T/topics/_main.queue" "$T/discord_last_sender.txt"
+set +e
+DC_DISPATCH_ONESHOT=1 DC_BIN="$T/bin/fake-dc" TG_BRIDGE_DIR="$T" timeout 30 bash "$B/discord/dc-dispatch.sh" >/dev/null 2>&1
+rc24=$?
+set -e
+pkill -f "$T/bin/discord/dc-outbox.sh" 2>/dev/null || true
+check "dc-dispatch oneshot exits 0" test "$rc24" = "0"
+check_grep "dc queue line format" "$T/topics/_main.queue" "@me#m3] third"
+check_grep "dc unknown sender tagged" "$T/topics/_main.queue" "@unknown_222#m2] second"
+check_grep "dc unknown logged" "$T/unknown_senders.log" "discord:222"
+check "dc own message skipped" test "$(grep -c . "$T/topics/_main.queue")" = "2"
+check "dc cursor saved" test "$(python3 -c "import json; print(json.load(open('$T/discord_cursors.json'))['C1'])")" = "m3"
+check "dc last sender" test "$(cat "$T/discord_last_sender.txt")" = "111"
+set +e
+DC_DISPATCH_ONESHOT=1 DC_BIN="$T/bin/fake-dc" TG_BRIDGE_DIR="$T" timeout 30 bash "$B/discord/dc-dispatch.sh" >/dev/null 2>&1
+set -e
+pkill -f "$T/bin/discord/dc-outbox.sh" 2>/dev/null || true
+check "dc no duplicates on re-poll" test "$(grep -c . "$T/topics/_main.queue")" = "2"
+
+# ---- 25. dc-outbox: [Discord→name] routing, reply/thread markers ----
+rm -f "$T/dc_sends.log" "$T/dead_letters.txt" "$T/outbox_state.json"
+printf '[Discord→me]\n__REPLY_TO__m3\nhello discord\n__TG_SEND__\n__THREAD__C9\nthread msg\n__TG_SEND__\n' > "$T/outbox.txt"
+set +e
+DC_BIN="$T/bin/fake-dc" TG_BRIDGE_DIR="$T" timeout 8 bash "$B/discord/dc-outbox.sh" >/dev/null 2>&1
+set -e
+pkill -f "$T/bin/discord/dc-outbox.sh" 2>/dev/null || true
+sleep 1
+check_grep "dc outbox DM send" "$T/dc_sends.log" "SEND channel=DM111 reply_to=m3 text=hello discord"
+check_grep "dc outbox thread send" "$T/dc_sends.log" "SEND channel=C9 reply_to=- text=thread msg"
+check "dc outbox drained" test ! -s "$T/outbox.txt"
+
+# ---- 26. tg-outbox accepts neutral __REPLY_TO__ / __THREAD__ markers ----
+rm -f "$T/sends.log"
+printf '12345\n' > "$T/forum_chat_id"
+printf '[Telegram→משני]\n__REPLY_TO__789\n__THREAD__5\nניטרלי\n__TG_SEND__\n' > "$T/outbox.txt"
+set +e
+timeout 5 bash "$B/tg-outbox.sh" >/dev/null 2>&1
+set -e
+pkill -f "$T/bin/tg-outbox.sh" 2>/dev/null || true
+check_grep "neutral reply marker routed" "$T/sends.log" "reply_to=789"
+check_grep "neutral thread marker routed" "$T/sends.log" "thread=5"
+rm -f "$T/forum_chat_id"
+
 echo "----"
 echo "passed: $pass failed: $fail"
 [ "$fail" = "0" ]
