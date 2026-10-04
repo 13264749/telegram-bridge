@@ -5,6 +5,8 @@
 # when new lines appear it prints them and exits 0 — the exit is the wake
 # signal for the topic's agent (whatever process supervises this script:
 # an agent runtime, a loop like examples/echo_agent.sh, systemd, ...).
+# Waiting is event-driven via inotifywait when available (instant wake),
+# plain sleep otherwise — see wait_for_change in lib.sh.
 # Polling is pure script: zero agent cost while idle.
 #
 # Queues: _main (private chats + forum General), or <thread_id> for a forum
@@ -44,5 +46,5 @@ while true; do
     } 200>"$LOCK"
   fi
   if [ "$GOT" = "1" ]; then exit 0; fi
-  sleep "$POLL"
+  wait_for_change "$Q" "$POLL"
 done
