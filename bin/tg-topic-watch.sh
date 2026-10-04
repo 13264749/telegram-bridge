@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # tg-topic-watch.sh <queue> — per-topic queue watcher (worker).
 #
-# Run as a tracked background exec in a topic's Muse chat. Polls
-# topics/<queue>.queue every TOPIC_WATCH_POLL seconds (default 3); when new
-# lines appear it prints them and exits 0 — the exit wakes only that chat's
-# agent. Polling is pure script: zero AI quota while idle.
+# Polls topics/<queue>.queue every TOPIC_WATCH_POLL seconds (default 3);
+# when new lines appear it prints them and exits 0 — the exit is the wake
+# signal for the topic's agent (whatever process supervises this script:
+# an agent runtime, a loop like examples/echo_agent.sh, systemd, ...).
+# Polling is pure script: zero agent cost while idle.
 #
 # Queues: _main (private chats + forum General), or <thread_id> for a forum
 # topic. Read position is kept in topics/<queue>.offset. Appends by
 # tg-dispatch.sh are flock-guarded; the read+offset update below holds the
 # same lock, so no message is lost or duplicated.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 source "$DIR/bin/lib.sh"
 QNAME="${1:?usage: tg-topic-watch.sh <queue>}"
 case "$QNAME" in
