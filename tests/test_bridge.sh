@@ -4,12 +4,10 @@
 set -euo pipefail
 # Portable paths: the suite runs from a checkout anywhere.
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-B="$SRC/bin"
-SKILL_TG="$HOME/workspace/skills/telegram-bridge/bin/tg"
 T=/tmp/tgtest_bridge
 rm -rf "$T"; mkdir -p "$T/bin" "$T/run"
 export TG_BRIDGE_DIR="$T"
-cp "$B/"*.sh "$B/"*.py "$T/bin/"
+cp "$SRC/bin/"*.sh "$SRC/bin/"*.py "$T/bin/"
 
 # ---- fake tg CLI ----
 cat > "$T/bin/fake-tg" <<'EOF'
@@ -53,6 +51,7 @@ check_grep() { # check_grep <name> <file> <pattern>
   else fail=$((fail+1)); echo "FAIL $name"; fi
 }
 
+B="$SRC/bin"
 printf '%s' '{"111": "ראשי", "222": "משני"}' > "$T/accounts.json"
 echo 0 > "$T/offset.txt"
 
@@ -255,23 +254,28 @@ pkill -f "$T/bin/tg-outbox.sh" 2>/dev/null || true
 sleep 1
 unset FAKE_MODE FAKE_TEXT
 
-# ---- 15. lib.sh: per-instance credential selection ----
-echo "custom.test-cred" > "$T/credential"
-CRED_OUT="$(TG_BRIDGE_DIR="$T" bash -c 'source "$HOME/workspace/telegram_bridge/bin/lib.sh"; printf "%s" "$TG_CREDENTIAL"')"
-check "credential file selects vault connector" test "$CRED_OUT" = "custom.test-cred"
-rm -f "$T/credential"
-CRED_DEF="$(TG_BRIDGE_DIR="$T" bash -c 'source "$HOME/workspace/telegram_bridge/bin/lib.sh"; printf "%s" "$TG_CREDENTIAL"')"
-check "no credential file defaults to custom.telegram" test "$CRED_DEF" = "custom.telegram"
+# ---- 15. lib.sh: token selection (env wins, then token file) ----
+echo "test-token-abc" > "$T/token"
+TOK_OUT="$(TG_BRIDGE_DIR="$T" bash -c "source '$B/lib.sh'; printf '%s' \"\$TG_TOKEN\"")"
+check "token file is exported" test "$TOK_OUT" = "test-token-abc"
+rm -f "$T/token"
+TOK_ENV="$(TG_BRIDGE_DIR="$T" TG_TOKEN="env-token-xyz" bash -c "source '$B/lib.sh'; printf '%s' \"\$TG_TOKEN\"")"
+check "TG_TOKEN env wins over missing file" test "$TOK_ENV" = "env-token-xyz"
+echo "file-token" > "$T/token"
+TOK_PREC="$(TG_BRIDGE_DIR="$T" TG_TOKEN="env-token-xyz" bash -c "source '$B/lib.sh'; printf '%s' \"\$TG_TOKEN\"")"
+check "TG_TOKEN env wins over token file" test "$TOK_PREC" = "env-token-xyz"
+rm -f "$T/token"
 
 # ---- 16. new-bot.sh scaffolds an independent instance ----
 SB="test_bot_scaffold_xy"
-rm -rf "$HOME/workspace/$SB"
-bash "$B/new-bot.sh" "$SB" "custom.telegram-xy" >/dev/null
-check "scaffold creates bin" test -f "$HOME/workspace/$SB/bin/tg-supervisor.sh" -a -f "$HOME/workspace/$SB/bin/lib.sh"
-check "scaffold writes credential file" test "$(cat "$HOME/workspace/$SB/credential")" = "custom.telegram-xy"
-check "scaffold creates empty accounts.json" test "$(cat "$HOME/workspace/$SB/accounts.json")" = "{}"
-check "scaffold copies tests" test -f "$HOME/workspace/$SB/tests/test_bridge.sh"
-rm -rf "$HOME/workspace/$SB"
+rm -rf "$T/$SB"
+bash "$B/new-bot.sh" "$SB" "$T" >/dev/null
+check "scaffold creates bin" test -f "$T/$SB/bin/tg-dispatch.sh" -a -f "$T/$SB/bin/lib.sh" -a -f "$T/$SB/bin/tg"
+check "scaffold writes empty token file" test -f "$T/$SB/token" -a ! -s "$T/$SB/token"
+check "scaffold creates empty accounts.json" test "$(cat "$T/$SB/accounts.json")" = "{}"
+check "scaffold copies tests" test -f "$T/$SB/tests/test_bridge.sh"
+check "scaffold copies docs+examples" test -f "$T/$SB/docs/AGENT_PROTOCOL.md" -a -f "$T/$SB/examples/echo_agent.sh"
+rm -rf "$T/$SB"
 
 # ---- 17. tg-ctl.sh is per-instance ----
 mkdir -p "$T/ia/bin" "$T/ib/bin"
@@ -376,28 +380,38 @@ timeout 5 bash "$B/tg-outbox.sh" >/dev/null 2>&1
 set -e
 check_grep "thread without forum -> dead letter" "$T/dead_letters.txt" "no forum_chat_id"
 
-# ---- 22. tg CLI tests (need the telegram-bridge skill's tg CLI; skipped in plain clones) ----
-if [ -f "$SKILL_TG" ]; then
+# ---- 22. in-repo tg CLI: imports, subcommands, clean no-token error ----
+# (regression: missing import os once broke every poll)
+REPO_TG="$B/tg"
 set +e
-python3 -c "import runpy; runpy.run_path('$SKILL_TG', run_name='__tg_test__')" >/dev/null 2>&1
+python3 -c "import runpy; runpy.run_path('$REPO_TG', run_name='__tg_test__')" >/dev/null 2>&1
 rc22a=$?
 set -e
 check "tg CLI imports without NameError" test "$rc22a" = "0"
-python3 "$SKILL_TG" send --help 2>&1 | grep -q -- "--thread-id" \
+python3 "$REPO_TG" send --help 2>&1 | grep -q -- "--thread-id" \
   && { pass=$((pass+1)); echo "PASS tg send has --thread-id"; } \
   || { fail=$((fail+1)); echo "FAIL tg send has --thread-id"; }
-python3 "$SKILL_TG" send --help 2>&1 | grep -q -- "--reply-to" \
+python3 "$REPO_TG" send --help 2>&1 | grep -q -- "--reply-to" \
   && { pass=$((pass+1)); echo "PASS tg send has --reply-to"; } \
   || { fail=$((fail+1)); echo "FAIL tg send has --reply-to"; }
-python3 "$SKILL_TG" create-topic --help 2>&1 | grep -q -- "--name" \
+python3 "$REPO_TG" create-topic --help 2>&1 | grep -q -- "--name" \
   && { pass=$((pass+1)); echo "PASS tg create-topic args"; } \
   || { fail=$((fail+1)); echo "FAIL tg create-topic args"; }
-python3 "$SKILL_TG" set-commands --help 2>&1 | grep -q -- "--commands" \
+python3 "$REPO_TG" set-commands --help 2>&1 | grep -q -- "--commands" \
   && { pass=$((pass+1)); echo "PASS tg set-commands args"; } \
   || { fail=$((fail+1)); echo "FAIL tg set-commands args"; }
-else
-  echo "SKIP tg CLI tests (skill tg not present at $SKILL_TG)"
-fi
+# no token anywhere -> exit 2 with a clean message (no traceback)
+set +e
+TG_TOKEN= TG_BRIDGE_DIR="$T/empty_nodir_xyz" python3 "$REPO_TG" getme >"$T/notok.out" 2>"$T/notok.err"
+rc22b=$?
+set -e
+check "tg without token exits 2" test "$rc22b" = "2"
+grep -q "no bot token" "$T/notok.err" \
+  && { pass=$((pass+1)); echo "PASS tg no-token message"; } \
+  || { fail=$((fail+1)); echo "FAIL tg no-token message"; }
+! grep -qi "traceback" "$T/notok.err" \
+  && { pass=$((pass+1)); echo "PASS tg no-token no traceback"; } \
+  || { fail=$((fail+1)); echo "FAIL tg no-token no traceback"; }
 
 echo "----"
 echo "passed: $pass failed: $fail"
