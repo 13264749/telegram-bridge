@@ -33,7 +33,7 @@
 # topics/, unknown_senders.log, health.json, bridge.log.
 # No message content is ever logged. No AI involved.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 source "$DIR/bin/lib.sh"
 mkdir -p "$DIR/run" "$DIR/topics"
 LOCKDIR="$DIR/run/dispatch.lock"
@@ -74,7 +74,7 @@ ACCOUNTS="$DIR/accounts.json"
 FORUM="$DIR/forum_chat_id"
 UNKNOWN="$DIR/unknown_senders.log"
 LAST_SENDER="$DIR/last_sender.txt"
-TG="${TG_BIN:-$HOME/workspace/skills/telegram-bridge/bin/tg}"
+TG="${TG_BIN:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tg}"
 TOPICS="$DIR/topics"
 QLOCK="$TOPICS/.lock"
 MAX_FAILURES="${DISPATCH_MAX_FAILURES:-10}"
