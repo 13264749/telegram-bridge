@@ -19,7 +19,7 @@ import os
 import sys
 from datetime import date, datetime
 
-bridge = os.environ.get("TG_BRIDGE_DIR", os.path.expanduser("~/workspace/telegram_bridge"))
+bridge = os.environ.get("TG_BRIDGE_DIR", os.path.expanduser("~/telegram-bridge"))
 rot_path = os.path.join(bridge, "rotation.json")
 health_path = os.path.join(bridge, "health.json")
 log_path = os.path.join(bridge, "bridge.log")
