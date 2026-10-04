@@ -22,7 +22,7 @@
 # on the next start instead of losing messages.
 # No AI is involved here.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 source "$DIR/bin/lib.sh"
 OUTBOX="$DIR/outbox.txt"
 PROCESSING="$DIR/.outbox_processing"
@@ -30,7 +30,7 @@ DEAD="$DIR/dead_letters.txt"
 STATE="$DIR/outbox_state.json"
 ACCOUNTS="$DIR/accounts.json"
 LAST_SENDER="$DIR/last_sender.txt"
-TG="${TG_BIN:-$HOME/workspace/skills/telegram-bridge/bin/tg}"
+TG="${TG_BIN:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tg}"
 SEP="__TG_SEND__"
 POLL="${OUTBOX_POLL_INTERVAL:-2}"
 touch "$OUTBOX"
