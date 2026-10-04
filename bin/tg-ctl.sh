@@ -20,6 +20,8 @@ pat() {
     inbox)      echo "$base/tg-inbo[x].sh" ;;
     outbox)     echo "$base/tg-outbo[x].sh" ;;
     dispatcher) echo "$base/tg-dispatc[h].sh" ;;
+    dc_dispatcher) echo "$base/discord/dc-dispatc[h].sh" ;;
+    dc_outbox) echo "$base/discord/dc-outbo[x].sh" ;;
     watcher)
       if [ -n "${2:-}" ]; then echo "$base/tg-topic-watc[h].sh $2";
       else echo "$base/tg-topic-watc[h].sh"; fi ;;
@@ -27,9 +29,9 @@ pat() {
 }
 
 do_status() {
-  for n in dispatcher watcher supervisor inbox outbox; do
+  for n in dispatcher dc_dispatcher watcher supervisor inbox outbox dc_outbox; do
     if pgrep -f "$(pat "$n")" >/dev/null; then s="running"; else s="DOWN"; fi
-    printf '%-10s %s\n' "$n" "$s"
+    printf '%-13s %s\n' "$n" "$s"
   done
   if [ -f "$DIR/last_poll.txt" ]; then
     lp="$(cat "$DIR/last_poll.txt")"
@@ -51,7 +53,7 @@ do_status() {
 do_stop() {
   local target="${1:-all}"
   local extra="${2:-}"
-  local order="dispatcher watcher supervisor inbox outbox"
+  local order="dispatcher dc_dispatcher watcher supervisor inbox outbox dc_outbox"
   [ "$target" != "all" ] && order="$target"
   for n in $order; do
     if pkill -f "$(pat "$n" "$extra")"; then echo "stopped $n${extra:+ ($extra)}"; else echo "$n not running"; fi
@@ -61,5 +63,5 @@ do_stop() {
 case "${1:-status}" in
   status) do_status ;;
   stop)   do_stop "${2:-all}" "${3:-}" ;;
-  *) echo "usage: tg-ctl.sh status | stop [all|dispatcher|watcher [queue]|supervisor|inbox|outbox]" >&2; exit 1 ;;
+  *) echo "usage: tg-ctl.sh status | stop [all|dispatcher|dc_dispatcher|watcher [queue]|supervisor|inbox|outbox|dc_outbox]" >&2; exit 1 ;;
 esac
