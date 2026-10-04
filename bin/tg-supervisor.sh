@@ -22,7 +22,7 @@
 # NOTE: a full VM restart kills everything including the supervisor; only an
 # external trigger (e.g. an hourly cron backstop) can recover from that.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 source "$DIR/bin/lib.sh"
 mkdir -p "$DIR/run"
 LOCKDIR="$DIR/run/supervisor.lock"
