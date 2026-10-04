@@ -10,7 +10,14 @@ to two files.
 Telegram --getUpdates--> tg-dispatch.sh --> topics/<queue>.queue
                                               (your agent reads)
 your agent --> outbox.txt --> tg-outbox.sh --> Telegram (sendMessage)
+
+Discord --REST poll--> dc-dispatch.sh --> topics/<queue>.queue
+your agent --> outbox.txt --> dc-outbox.sh --> Discord
 ```
+
+One bridge instance = one transport (`new-bot.sh --source discord`
+for Discord). The queue/outbox contract below is identical; only the
+source tag differs (`Telegram` vs `Discord`).
 
 - **In:** `topics/_main.queue` (private chats + forum General topic) or
   `topics/<thread_id>.queue` (a forum topic). One line per message.
@@ -55,7 +62,7 @@ Example — private reply threaded under the question:
 
 ```
 [Telegram→me]
-__TG_REPLY_TO__123
+__REPLY_TO__123
 Hello from the other side.
 __TG_SEND__
 ```
@@ -63,8 +70,8 @@ __TG_SEND__
 Example — reply inside forum topic 7:
 
 ```
-__TG_THREAD__7
-__TG_REPLY_TO__456
+__THREAD__7
+__REPLY_TO__456
 Noted, tracking it here.
 __TG_SEND__
 ```
