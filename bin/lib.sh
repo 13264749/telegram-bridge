@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Shared helpers for the telegram bridge scripts. Source it after setting DIR:
-#   DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+#   DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 #   source "$DIR/bin/lib.sh"
-BRIDGE_DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+BRIDGE_DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 
-# Per-bot credential selection: a `credential` file in the bridge dir names
-# the Secure Vault connector holding this bot's token
-# (e.g. custom.telegram-side). Exported so the tg CLI and every child
-# process use the right bot. Default (no file): custom.telegram.
-if [ -z "${TG_CREDENTIAL:-}" ] && [ -f "$BRIDGE_DIR/credential" ]; then
-  TG_CREDENTIAL="$(tr -d '[:space:]' < "$BRIDGE_DIR/credential")"
+# Bot token: TG_TOKEN env wins; otherwise read the `token` file in the
+# bridge dir (chmod 600, never committed). The tg CLI reads the same
+# sources, so every child process talks to this bot.
+if [ -z "${TG_TOKEN:-}" ] && [ -f "$BRIDGE_DIR/token" ]; then
+  TG_TOKEN="$(tr -d '[:space:]' < "$BRIDGE_DIR/token")"
 fi
-export TG_CREDENTIAL="${TG_CREDENTIAL:-custom.telegram}"
+export TG_TOKEN
 
 # bridge_log <message> — metadata-only event log (never message content).
 bridge_log() {
