@@ -85,8 +85,8 @@ except Exception:
     state = {}
 
 TAG_RE = re.compile(r"^\[Telegram→(.+?)\]\s*$")
-REPLY_RE = re.compile(r"^__TG_REPLY_TO__(\d+)\s*$")
-THREAD_RE = re.compile(r"^__TG_THREAD__(general|\d+)\s*$")
+REPLY_RE = re.compile(r"^__(?:TG_)?REPLY_TO__(\S+)\s*$")
+THREAD_RE = re.compile(r"^__(?:TG_)?THREAD__(general|\S+)\s*$")
 FORUM_FILE = os.path.join(bridge, "forum_chat_id")
 
 def forum_chat_id():
