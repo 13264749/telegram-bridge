@@ -1,70 +1,86 @@
 # telegram-bridge
 
-DIY Telegram bridge: chat with an AI agent from Telegram. One Telegram
-message = exactly one agent turn — the same cost as a normal chat message.
-Everything between you and the agent is plain scripts; no AI in the loop.
+Chat with your AI agent from Telegram. One Telegram message wakes the
+agent exactly once — no polling loops burning tokens, no webhooks, no
+server. Everything between Telegram and your agent is plain scripts.
 
 ## How it works
 
 ```
-Telegram --getUpdates--> tg-dispatch.sh --topics/<queue>.queue--> tg-topic-watch.sh
-   (single consumer,      (flock-guarded, 0 quota)                (tracked exec in
-    never exits on                                        the topic's chat; exits
-    messages)                                            only on new lines)
+Telegram --getUpdates--> tg-dispatch.sh --> topics/<queue>.queue --> your agent
+your agent --> outbox.txt --> tg-outbox.sh --> Telegram
 ```
 
-- **`bin/tg-dispatch.sh`** — the single `getUpdates` long-poller. Routes every
-  message from an authorized account into a per-topic queue file
-  (`topics/_main.queue` for private chats + the forum's General topic,
-  `topics/<thread_id>.queue` for forum topics). Never exits on messages —
-  only on fatal/config errors. Also keeps the outbox daemon alive.
-- **`bin/tg-topic-watch.sh <queue>`** — runs as a tracked background process
-  in each topic's chat. Polls the queue file every few seconds; prints new
-  lines and exits, waking only that chat's agent. Zero quota while idle.
-  One chat per topic = no context mixing.
-- **`bin/tg-outbox.sh`** — sends queued replies. Queue entries are separated
-  by `__TG_SEND__` lines and may carry routing markers (all stripped before
-  sending):
-  - `[Telegram→name]` — route to an account from `accounts.json`
-  - `__TG_REPLY_TO__<message_id>` — thread the reply under a message
-  - `__TG_THREAD__<thread_id|general>` — post into a forum topic
-- **`bin/tg-ctl.sh`** — `status` / `stop` (per-instance aware).
-- **`bin/new-bot.sh`** — scaffold an independent bridge instance for an
-  additional bot (own token, offset, queues, chat).
-- **`bin/rotation_check.py`** — suggests a chat rotation when the transcript
-  grows past a threshold (message count or age).
+- **`bin/tg-dispatch.sh`** — the single `getUpdates` long-poller. Routes
+  every message into a per-topic queue file. Never exits on messages;
+  transient API errors are swallowed with backoff.
+- **`bin/tg-topic-watch.sh <queue>`** — prints new queue lines and exits.
+  Your agent loops over it: each exit means "new messages, handle them".
+  Zero cost while idle.
+- **`bin/tg-outbox.sh`** — sends queued replies, retries with backoff,
+  dead-letters after final failure.
+- **`bin/tg`** — standalone Telegram Bot API CLI (`getme`, `updates`,
+  `send`, `create-topic`, `set-commands`). Token from `TG_TOKEN` env or
+  the `token` file (chmod 600, never committed).
+- **`bin/new-bot.sh`** — scaffold an independent instance for another bot.
 
-## Requirements
+## Quickstart (5 minutes)
 
-- A Telegram bot token (via [@BotFather](https://t.me/BotFather)).
-- A `tg` CLI speaking the Telegram Bot API with subcommands
-  `getme` / `updates` / `send` / `create-topic` / `set-commands`
-  (override path with `TG_BIN`). The reference setup keeps the token in a
-  vault and selects it per instance via `TG_CREDENTIAL` / a `credential` file.
-- `accounts.json`: `{"<chat_id>": "<name>", ...}` (see `accounts.json.example`).
+```bash
+# 1. Create a bot with @BotFather on Telegram, copy its token.
+git clone https://github.com/13264749/telegram-bridge.git
+cd telegram-bridge
 
-## Forum topics (optional)
+# 2. Token + who may talk to the bot (your Telegram numeric chat id;
+#    find it via @userinfobot).
+echo '<bot-token>' > token && chmod 600 token
+cp accounts.json.example accounts.json   # then edit the ids
+bin/tg getme                              # verify the token
 
-1. Create a private supergroup, enable Topics, add the bot as admin with
-   topic-management rights (bots cannot flip the Topics switch themselves).
-2. Write `/start` in General, note the group chat id from
-   `unknown_senders.log`, save it to `forum_chat_id`.
-3. Say "open topic <name>" (or `/newtopic <name>`) — the agent creates the
-   forum topic, a chat for it, and starts its watcher.
+# 3. Terminal 1 — the dispatcher (Telegram → queues):
+TG_BRIDGE_DIR=$PWD bin/tg-dispatch.sh
+
+# 4. Terminal 2 — an agent (queues → Telegram).
+#    Echo example (no API key needed):
+TG_BRIDGE_DIR=$PWD bash examples/echo_agent.sh
+#    Or the LLM example (needs LLM_API_KEY):
+LLM_API_KEY=sk-... TG_BRIDGE_DIR=$PWD python3 examples/llm_agent.py
+```
+
+Message your bot on Telegram — it answers.
+
+## Wiring your own agent
+
+Your agent only needs to speak two files — see
+[`docs/AGENT_PROTOCOL.md`](docs/AGENT_PROTOCOL.md):
+
+- **In:** lines like `[Telegram 14:32 @me#123] hello` from
+  `topics/_main.queue` (via `bin/tg-topic-watch.sh`).
+- **Out:** append reply blocks to `outbox.txt`, e.g.
+  ```
+  [Telegram→me]
+  __TG_REPLY_TO__123
+  Hello!
+  __TG_SEND__
+  ```
+
+## Features
+
+- **Forum topics** — each topic gets its own queue and agent context, no
+  mixing. The bot can open topics itself (`/newtopic <name>`).
+  See [`docs/TOPICS.md`](docs/TOPICS.md).
+- **Multi-bot** — independent instances per bot, one checkout.
+  See [`docs/MULTIBOT.md`](docs/MULTIBOT.md).
+- **Bot commands** — `/start`, `/help`, `/newtopic` menu.
+  See [`docs/COMMANDS.md`](docs/COMMANDS.md).
+- **Long conversations** — rotation suggestions when context grows.
+  See [`docs/ROTATION.md`](docs/ROTATION.md).
 
 ## Tests
 
 ```bash
 bash tests/test_bridge.sh   # no network; uses a fake tg CLI
 ```
-
-## Docs
-
-- `PROTOCOL.md` — the conversation agent's runbook
-- `TOPICS.md` — forum topics design
-- `MULTIBOT.md` — running several bots
-- `ROTATION.md` — chat rotation policy
-- `COMMANDS_PLAN.md` — bot command menu plan
 
 ## License
 
