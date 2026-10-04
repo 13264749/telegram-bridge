@@ -11,6 +11,16 @@ if [ -z "${TG_TOKEN:-}" ] && [ -f "$BRIDGE_DIR/token" ]; then
   TG_TOKEN="$(tr -d '[:space:]' < "$BRIDGE_DIR/token")"
 fi
 export TG_TOKEN
+# Discord transport: DISCORD_TOKEN env, else the same `token` file
+# (a Discord instance's token file holds the Discord bot token).
+if [ -z "${DISCORD_TOKEN:-}" ]; then
+  if [ -n "${TG_TOKEN:-}" ]; then
+    DISCORD_TOKEN="$TG_TOKEN"
+  elif [ -f "$BRIDGE_DIR/token" ]; then
+    DISCORD_TOKEN="$(tr -d '[:space:]' < "$BRIDGE_DIR/token")"
+  fi
+fi
+export DISCORD_TOKEN
 
 # bridge_log <message> — metadata-only event log (never message content).
 bridge_log() {
