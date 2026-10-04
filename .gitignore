@@ -1,4 +1,5 @@
-# runtime state (per instance, never commit)
+# secrets and runtime state (per instance, never commit)
+token
 offset.txt
 last_poll.txt
 last_sender.txt
@@ -11,9 +12,8 @@ rotation.json
 dead_letters.txt
 unknown_senders.log
 conversation.md
-config.json
-credential
 forum_chat_id
+.outbox.lock
 topics/
 run/
 staging/
