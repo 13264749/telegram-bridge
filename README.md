@@ -1,8 +1,9 @@
 # telegram-bridge
 
-Chat with your AI agent from Telegram. One Telegram message wakes the
-agent exactly once — no polling loops burning tokens, no webhooks, no
-server. Everything between Telegram and your agent is plain scripts.
+Chat with your AI agent from Telegram **or Discord**. One message wakes
+the agent exactly once — no polling loops burning tokens, no webhooks, no
+server. Everything between the chat platform and your agent is plain
+scripts.
 
 ## How it works
 
@@ -67,7 +68,10 @@ Your agent only needs to speak two files — see
 
 ## Features
 
-- **Forum topics** — each topic gets its own queue and agent context, no
+- **Telegram + Discord** — one bridge instance per transport
+  (`bin/new-bot.sh --source discord`). Same queue/outbox contract.
+  See [`docs/DISCORD.md`](docs/DISCORD.md).
+- **Forum topics / threads** — each topic gets its own queue and agent context, no
   mixing. The bot can open topics itself (`/newtopic <name>`).
   See [`docs/TOPICS.md`](docs/TOPICS.md).
 - **Multi-bot** — independent instances per bot, one checkout.
