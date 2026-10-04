@@ -16,14 +16,14 @@
 # State: offset.txt, last_sender.txt, accounts.json, unknown_senders.log,
 # health.json, bridge.log. No message content is ever logged. No AI involved.
 set -euo pipefail
-DIR="${TG_BRIDGE_DIR:-$HOME/workspace/telegram_bridge}"
+DIR="${TG_BRIDGE_DIR:-$HOME/telegram-bridge}"
 source "$DIR/bin/lib.sh"
 OFFSET_FILE="$DIR/offset.txt"
 HEARTBEAT="$DIR/last_poll.txt"
 ACCOUNTS="$DIR/accounts.json"
 UNKNOWN="$DIR/unknown_senders.log"
 LAST_SENDER="$DIR/last_sender.txt"
-TG="${TG_BIN:-$HOME/workspace/skills/telegram-bridge/bin/tg}"
+TG="${TG_BIN:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tg}"
 INBOX_MAX_FAILURES="${INBOX_MAX_FAILURES:-10}"
 INBOX_FAIL_STEP="${INBOX_FAIL_STEP:-5}"
 FAILURES=0
